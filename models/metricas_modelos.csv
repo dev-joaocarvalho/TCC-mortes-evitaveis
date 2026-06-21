@@ -1,0 +1,4 @@
+modelo,R2,RMSE,MAE
+OLS (linear),0.092,71.004,53.92
+Random Forest,0.091,71.018,54.1
+XGBoost,0.103,70.554,53.703

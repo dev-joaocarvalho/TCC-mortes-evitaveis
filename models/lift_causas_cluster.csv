@@ -1,0 +1,41 @@
+CLUSTER,CID_CAT3,lift,n,descricao
+0,I64,1.637,3631,Acid vasc cerebr NE como hemorrag isquemico
+0,F10,1.616,1809,Transt mentais comport dev uso alcool
+0,E11,1.598,2049,Diabetes mellitus nao-insulino-dependemte
+0,B57,1.503,371,Doenc de Chagas
+0,A09,1.485,321,Diarreia e gastroenterite orig infecc presum
+0,K70,1.463,2300,Doenc alcoolica do figado
+0,G40,1.368,658,Epilepsia
+0,C44,1.359,269,Outr neopl malig da pele
+0,C53,1.305,1200,Neopl malig do colo do utero
+0,N18,1.192,837,Insuf renal cronica
+1,B65,2.469,286,Esquistossomose
+1,B57,1.658,1125,Doenc de Chagas
+1,F10,1.623,4995,Transt mentais comport dev uso alcool
+1,I64,1.469,8959,Acid vasc cerebr NE como hemorrag isquemico
+1,A04,1.455,326,Outr infecc intestinais bacter
+1,E11,1.397,4924,Diabetes mellitus nao-insulino-dependemte
+1,J22,1.392,267,Infecc agudas NE das vias aereas infer
+1,K27,1.387,341,Ulcera peptica de localiz NE
+1,J11,1.379,269,Influenza dev virus nao identificado
+1,K70,1.328,5741,Doenc alcoolica do figado
+2,A90,1.685,568,Dengue
+2,J43,1.273,607,Enfisema
+2,I10,1.192,5050,Hipertensao essencial
+2,C15,1.19,2162,Neopl malig do esofago
+2,C06,1.171,265,Neopl malig outr partes e partes NE da boca
+2,I62,1.168,302,Outr hemorragias intracranianas nao-traum
+2,I67,1.156,2404,Outr doenc cerebrovasculares
+2,A41,1.154,3939,Outr septicemias
+2,C32,1.148,1148,Neopl malig da laringe
+2,C43,1.145,413,Melanoma malig da pele
+3,A39,1.213,205,Infecc meningogocica
+3,I63,1.212,14564,Infarto cerebral
+3,J40,1.174,237,Bronquite NE como aguda ou cronica
+3,B18,1.17,2190,Hepatite viral cronica
+3,I25,1.166,25867,Doenc isquemica cronica do coracao
+3,I70,1.153,719,Aterosclerose
+3,C18,1.149,24130,Neopl malig do colon
+3,E03,1.135,715,Outr hipotireoidismos
+3,J10,1.135,910,Influenza dev virus influenza identificado
+3,A17,1.128,252,Tuberc do sist nervoso

@@ -1,0 +1,61 @@
+CLUSTER,rank,CID_CAT3,descricao,n,pct
+0,1,I21,Infarto agudo do miocardio,10478,15.29
+0,2,E14,Diabetes mellitus NE,4019,5.86
+0,3,I64,Acid vasc cerebr NE como hemorrag isquemico,3631,5.3
+0,4,J18,Pneumonia p/microorg NE,3304,4.82
+0,5,I10,Hipertensao essencial,2608,3.81
+0,6,K70,Doenc alcoolica do figado,2300,3.36
+0,7,A41,Outr septicemias,2139,3.12
+0,8,I50,Insuf cardiaca,2106,3.07
+0,9,C34,Neopl malig dos bronquios e dos pulmoes,2105,3.07
+0,10,J44,Outr doenc pulmonares obstrutivas cronicas,2080,3.03
+0,11,E11,Diabetes mellitus nao-insulino-dependemte,2049,2.99
+0,12,F10,Transt mentais comport dev uso alcool,1809,2.64
+0,13,C16,Neopl malig do estomago,1734,2.53
+0,14,I61,Hemorragia intracerebral,1643,2.4
+0,15,C50,Neopl malig da mama,1505,2.2
+1,1,I21,Infarto agudo do miocardio,26144,13.87
+1,2,E14,Diabetes mellitus NE,12629,6.7
+1,3,J18,Pneumonia p/microorg NE,9394,4.98
+1,4,I64,Acid vasc cerebr NE como hemorrag isquemico,8959,4.75
+1,5,I10,Hipertensao essencial,7536,4.0
+1,6,C34,Neopl malig dos bronquios e dos pulmoes,6346,3.37
+1,7,I50,Insuf cardiaca,5878,3.12
+1,8,J44,Outr doenc pulmonares obstrutivas cronicas,5868,3.11
+1,9,K70,Doenc alcoolica do figado,5741,3.05
+1,10,A41,Outr septicemias,5439,2.89
+1,11,F10,Transt mentais comport dev uso alcool,4995,2.65
+1,12,E11,Diabetes mellitus nao-insulino-dependemte,4924,2.61
+1,13,C50,Neopl malig da mama,4606,2.44
+1,14,I61,Hemorragia intracerebral,4342,2.3
+1,15,C16,Neopl malig do estomago,4263,2.26
+2,1,I21,Infarto agudo do miocardio,16239,12.78
+2,2,J18,Pneumonia p/microorg NE,7429,5.85
+2,3,E14,Diabetes mellitus NE,6661,5.24
+2,4,C34,Neopl malig dos bronquios e dos pulmoes,6069,4.78
+2,5,J44,Outr doenc pulmonares obstrutivas cronicas,5861,4.61
+2,6,I10,Hipertensao essencial,5050,3.97
+2,7,I64,Acid vasc cerebr NE como hemorrag isquemico,4296,3.38
+2,8,I50,Insuf cardiaca,4082,3.21
+2,9,C50,Neopl malig da mama,4074,3.21
+2,10,A41,Outr septicemias,3939,3.1
+2,11,I61,Hemorragia intracerebral,3016,2.37
+2,12,C18,Neopl malig do colon,2792,2.2
+2,13,K70,Doenc alcoolica do figado,2779,2.19
+2,14,C16,Neopl malig do estomago,2600,2.05
+2,15,I67,Outr doenc cerebrovasculares,2404,1.89
+3,1,I21,Infarto agudo do miocardio,120543,12.46
+3,2,J18,Pneumonia p/microorg NE,51788,5.35
+3,3,E14,Diabetes mellitus NE,51755,5.35
+3,4,C34,Neopl malig dos bronquios e dos pulmoes,45844,4.74
+3,5,J44,Outr doenc pulmonares obstrutivas cronicas,41707,4.31
+3,6,C50,Neopl malig da mama,35124,3.63
+3,7,I10,Hipertensao essencial,29869,3.09
+3,8,I64,Acid vasc cerebr NE como hemorrag isquemico,26861,2.78
+3,9,I50,Insuf cardiaca,26129,2.7
+3,10,I25,Doenc isquemica cronica do coracao,25867,2.67
+3,11,A41,Outr septicemias,24784,2.56
+3,12,C18,Neopl malig do colon,24130,2.49
+3,13,I61,Hemorragia intracerebral,23412,2.42
+3,14,C16,Neopl malig do estomago,20808,2.15
+3,15,K70,Doenc alcoolica do figado,20182,2.09

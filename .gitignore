@@ -1,0 +1,28 @@
+# Dados brutos e processados (grandes demais para o git)
+data/
+
+# Cache Python
+__pycache__/
+*.pyc
+*.pyo
+.Python
+
+# Ambientes virtuais
+venv/
+.env
+.venv/
+
+# Streamlit
+.streamlit/
+
+# IDEs
+.vscode/
+.idea/
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Jupyter (caso apareçam)
+.ipynb_checkpoints/
+*.ipynb
