@@ -26,3 +26,7 @@ Thumbs.db
 # Jupyter (caso apareçam)
 .ipynb_checkpoints/
 *.ipynb
+
+# Logs e backups locais do pipeline
+pipeline*.log
+models_original_git/
