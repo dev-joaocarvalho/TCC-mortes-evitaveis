@@ -101,45 +101,75 @@ def classificar_cid(cid: str) -> Optional[str]:
     return _LBCE_RAW.get(c[:3])
 
 
-# ─── EXTRACT — SIM via PySUS ───────────────────────────────────────────────────
-def _baixar_uf_ano_pysus(uf: str, ano: int, cache_dir: Path) -> pd.DataFrame:
-    """Tenta baixar microdados SIM de uma UF/ano via PySUS (com cache local)."""
+# ─── EXTRACT — SIM via FTP do DATASUS ─────────────────────────────────────────
+# Obs.: a versão anterior usava PySUS, mas a API do pacote mudou (pysus 2.x) e a
+# versão antiga falha no Windows. Os mesmos arquivos DO{UF}{ANO}.dbc são baixados
+# diretamente do FTP público do DATASUS.
+SIM_FTP_HOST = "ftp.datasus.gov.br"
+SIM_FTP_DIR  = "/dissemin/publicos/SIM/CID10/DORES"
+SIM_COLUNAS  = ["CAUSABAS", "IDADE", "CODMUNRES"]
+
+
+def _ler_dbf_colunas(path: Path, colunas: list[str]) -> pd.DataFrame:
+    """Leitor DBF (dBase III) vetorizado: lê só as colunas pedidas."""
+    raw = path.read_bytes()
+    n_rec  = int.from_bytes(raw[4:8], "little")
+    h_len  = int.from_bytes(raw[8:10], "little")
+    r_len  = int.from_bytes(raw[10:12], "little")
+    campos, pos, off = {}, 32, 1          # 1º byte do registro = flag de exclusão
+    while raw[pos] != 0x0D:
+        nome = raw[pos:pos+11].split(b"\x00")[0].decode("latin-1").strip()
+        tam  = raw[pos+16]
+        campos[nome] = (off, tam)
+        off += tam
+        pos += 32
+    dados = np.frombuffer(raw, dtype=np.uint8, count=n_rec * r_len, offset=h_len).reshape(n_rec, r_len)
+    ativos = dados[:, 0] != ord("*")
+    out = {}
+    for c in colunas:
+        o, t = campos[c]
+        col = dados[ativos, o:o+t].copy().view(f"S{t}").ravel()
+        out[c] = pd.Series(col).str.decode("latin-1").str.strip()
+    return pd.DataFrame(out)
+
+
+def _baixar_uf_ano_ftp(uf: str, ano: int, cache_dir: Path) -> pd.DataFrame:
+    """Baixa DO{UF}{ANO}.dbc do FTP do DATASUS, descompacta e lê (com cache)."""
     cache = cache_dir / f"sim_{uf}_{ano}.parquet"
     if cache.exists():
         return pd.read_parquet(cache)
 
-    df = None
+    import ftplib
+    import datasus_dbc  # descompactador .dbc → .dbf
 
-    # Tentativa 1 — API moderna pysus >= 0.4
-    try:
-        from pysus.ftp.databases.sim import SIM as SIMdb  # type: ignore
-        sim = SIMdb()
-        files = sim.get_files(group="DORES", year=ano, state=uf)
-        if files:
-            item = files[0] if isinstance(files, (list, tuple)) else files
-            content = sim.download(item)
-            df = content.to_dataframe() if hasattr(content, "to_dataframe") else content
-    except Exception:
-        pass
-
-    # Tentativa 2 — API legada pysus < 0.4
-    if df is None:
+    nome = f"DO{uf}{ano}.dbc"
+    dbc  = cache_dir / nome
+    dbf  = cache_dir / nome.replace(".dbc", ".dbf")
+    for tentativa in range(4):
         try:
-            from pysus.online_data import SIM as SIMold  # type: ignore
-            result = SIMold.download(uf, ano)
-            df = result.to_dataframe() if hasattr(result, "to_dataframe") else result
-        except Exception:
-            pass
+            with ftplib.FTP(SIM_FTP_HOST, timeout=120) as ftp:
+                ftp.login()
+                ftp.cwd(SIM_FTP_DIR)
+                with open(dbc, "wb") as fh:
+                    ftp.retrbinary(f"RETR {nome}", fh.write)
+            break
+        except Exception as e:
+            print(f"\n  [SIM] {nome}: tentativa {tentativa+1} falhou ({e})")
+            time.sleep(10 * (tentativa + 1))
+    else:
+        raise RuntimeError(f"Não foi possível baixar {nome} do FTP do DATASUS")
 
-    if df is not None and not df.empty:
-        df.to_parquet(cache)
-
-    return df if df is not None else pd.DataFrame()
+    datasus_dbc.decompress(str(dbc), str(dbf))
+    df = _ler_dbf_colunas(dbf, SIM_COLUNAS)
+    df.to_parquet(cache)
+    dbc.unlink(missing_ok=True)
+    dbf.unlink(missing_ok=True)
+    return df
 
 
 def extrair_sim() -> pd.DataFrame:
-    """Extrai todos os microdados SIM (2022–2024) via PySUS com cache."""
-    print("  [SIM] Baixando microdados via PySUS...")
+    """Extrai todos os microdados SIM (2022–2024) do FTP do DATASUS com cache."""
+    print("  [SIM] Baixando microdados do FTP do DATASUS...")
     cache_dir = DATA_RAW / "sim"
     cache_dir.mkdir(exist_ok=True)
 
@@ -153,15 +183,14 @@ def extrair_sim() -> pd.DataFrame:
     total = len(tarefas)
     for i, (uf, ano) in enumerate(tarefas, 1):
         print(f"  [SIM] {uf}/{ano} ({i}/{total})...", end="\r")
-        df = _baixar_uf_ano_pysus(uf, ano, cache_dir)
+        df = _baixar_uf_ano_ftp(uf, ano, cache_dir)
         if not df.empty:
             df["_UF"] = uf
             df["_ANO"] = ano
             dfs.append(df)
 
-    if not dfs:
-        print("\n  [SIM] AVISO: Nenhum dado baixado. Verifique a instalação do pysus.")
-        return pd.DataFrame()
+    if len(dfs) < total:
+        raise RuntimeError(f"[SIM] Apenas {len(dfs)}/{total} arquivos UF/ano obtidos.")
 
     sim = pd.concat(dfs, ignore_index=True)
     sim.to_parquet(parquet_final)
@@ -201,8 +230,9 @@ def transformar_sim(sim: pd.DataFrame) -> pd.DataFrame:
     sim5_74["GRUPO_LBCE"] = sim5_74["CAUSABAS"].apply(classificar_cid)
     evitaveis = sim5_74[sim5_74["GRUPO_LBCE"].notna()].copy()
 
-    # Código municipal: SIM usa 6 dígitos
-    evitaveis["CODMUN6"] = evitaveis["CODMUNRES"].astype(str).str.zfill(7).str[:6]
+    # Código municipal: o SIM já usa 6 dígitos (o zfill(7)[:6] anterior cortava o
+    # último dígito e fundia municípios diferentes)
+    evitaveis["CODMUN6"] = evitaveis["CODMUNRES"].astype(str).str.strip().str.zfill(6).str[:6]
     evitaveis["CID_CAT3"] = evitaveis["CAUSABAS"].astype(str).str[:3].str.upper()
 
     # Agregação por município × ano
@@ -227,6 +257,16 @@ def transformar_sim(sim: pd.DataFrame) -> pd.DataFrame:
         .rename(columns={"_ANO": "ANO"})
     )
     top_cid.to_parquet(DATA_PROC / "top_cid_municipio.parquet")
+
+    # Óbitos por faixa etária quinquenal (5–9 … 70–74) — base da padronização direta
+    evitaveis["FAIXA"] = (evitaveis["IDADE_ANOS"] // 5 * 5).astype(int)
+    por_faixa = (
+        evitaveis.groupby(["CODMUN6", "_ANO", "FAIXA"])
+        .size()
+        .reset_index(name="OBITOS")
+        .rename(columns={"_ANO": "ANO"})
+    )
+    por_faixa.to_parquet(DATA_PROC / "obitos_faixa_municipio.parquet")
 
     print(f"  [Transform] {len(evitaveis):,} óbitos evitáveis → {len(agg):,} municípios-ano.")
     return agg
@@ -257,6 +297,39 @@ def extrair_populacao() -> pd.DataFrame:
     return _sidra_get(url, "2022", "POPULACAO")
 
 
+def extrair_populacao_idade() -> pd.DataFrame:
+    """População municipal por faixa quinquenal 5–74 anos (Censo 2022, Sidra 9514)."""
+    print("  [IBGE] Baixando população por faixa etária (Censo 2022, tabela 9514)...")
+    cache = DATA_PROC / "populacao_faixa.parquet"
+    if cache.exists():
+        return pd.read_parquet(cache)
+
+    import re
+    meta = requests.get("https://servicodados.ibge.gov.br/api/v3/agregados/9514/metadados",
+                        timeout=90).json()
+    idade = next(c for c in meta["classificacoes"] if c["id"] == 287)
+    faixas = {}
+    for cat in idade["categorias"]:
+        m = re.fullmatch(r"(\d+) a (\d+) anos", cat["nome"])
+        if m and int(m.group(2)) - int(m.group(1)) == 4 and 5 <= int(m.group(1)) <= 70:
+            faixas[int(m.group(1))] = cat["id"]
+    assert len(faixas) == 14, f"Esperadas 14 faixas (5–74), obtidas {sorted(faixas)}"
+
+    dfs = []
+    for ini, cat_id in sorted(faixas.items()):
+        url = ("https://servicodados.ibge.gov.br/api/v3/agregados/9514/periodos/2022"
+               f"/variaveis/93?localidades=N6[all]&classificacao=2[6794]|287[{cat_id}]|286[113635]")
+        df = _sidra_get(url, "2022", "POP")
+        if df.empty:
+            raise RuntimeError(f"[IBGE] Falha na faixa {ini}–{ini+4}")
+        df["FAIXA"] = ini
+        dfs.append(df)
+    pop = pd.concat(dfs, ignore_index=True)
+    pop["CODMUN6"] = pop["CODMUN7"].str.zfill(7).str[:6]
+    pop.to_parquet(cache)
+    return pop
+
+
 def extrair_pib() -> pd.DataFrame:
     print("  [IBGE] Baixando PIB municipal (2021)...")
     url = ("https://servicodados.ibge.gov.br/api/v3/agregados/5938"
@@ -272,28 +345,89 @@ def extrair_despesa_saude() -> pd.DataFrame:
     if cache.exists():
         return pd.read_parquet(cache)
 
-    rows = []
-    for ano in ANOS:
-        url = (
-            f"https://apidatalake.tesouro.gov.br/ords/siconfi/tt/rreo"
-            f"?an_exercicio={ano}&in_periodicidade=A&nr_periodo=6"
-            f"&co_tipo_demonstrativo=RREO&no_anexo=RREO-Anexo%2002"
-            f"&co_esfera=M&co_poder=E&co_funcao=10"
-        )
-        try:
-            r = requests.get(url, timeout=120)
-            data = r.json()
-            items = data.get("items", data) if isinstance(data, dict) else data
-            for item in (items if isinstance(items, list) else []):
-                cod = str(item.get("co_municipio_ibge", "")).zfill(7)[:6]
-                val = item.get("vl_despesa_liquidada") or item.get("vl_despesa_empenhada")
-                if cod and val:
-                    rows.append({"CODMUN6": cod, "ANO": ano, "DESPESA_SAUDE_RS": float(val)})
-        except Exception as e:
-            print(f"  [SICONFI] Erro ano {ano}: {e}")
+    # A API do SICONFI exige id_ente: sem ele a consulta retorna 0 itens.
+    # Consulta-se o RREO Anexo 02 (despesa por função) do 6º bimestre de cada
+    # município, filtrando a conta "Saúde" (função 10) e usando a despesa
+    # liquidada até o bimestre (total anual).
+    municipios = requests.get(
+        "https://servicodados.ibge.gov.br/api/v1/localidades/municipios", timeout=120
+    ).json()
+    ids = [str(m["id"]) for m in municipios]
+    raw_dir = DATA_RAW / "siconfi"
+    raw_dir.mkdir(exist_ok=True)
+    filtro = requests.utils.quote(json.dumps({"conta": "Saúde"}))
 
-    df = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["CODMUN6","ANO","DESPESA_SAUDE_RS"])
-    df.to_parquet(cache)
+    def consultar(id_ente: str, ano: int) -> dict:
+        # Municípios < 50 mil hab. podem publicar o "RREO Simplificado" (LRF, art. 63);
+        # tenta o RREO completo e, se não houver a conta Saúde, o simplificado.
+        houve_erro = False
+        for tipo in ("RREO", "RREO%20Simplificado"):
+            d = _consultar_tipo(id_ente, ano, tipo)
+            if d["valor"] == "ERRO":
+                houve_erro = True
+            elif d["valor"] is not None:
+                return d
+        if houve_erro:                       # não conclui "sem dado" se alguma consulta falhou
+            return {"id": id_ente, "ano": ano, "valor": "ERRO"}
+        return {"id": id_ente, "ano": ano, "valor": None, "tipos_testados": 2}
+
+    def _consultar_tipo(id_ente: str, ano: int, tipo: str) -> dict:
+        url = ("https://apidatalake.tesouro.gov.br/ords/siconfi/tt/rreo"
+               f"?an_exercicio={ano}&nr_periodo=6&co_tipo_demonstrativo={tipo}"
+               f"&no_anexo=RREO-Anexo%2002&co_esfera=M&id_ente={id_ente}&q={filtro}")
+        for tentativa in range(6):
+            try:
+                r = requests.get(url, timeout=90)
+                if r.status_code == 429 or r.status_code >= 500:
+                    raise RuntimeError(f"HTTP {r.status_code}")
+                itens = r.json().get("items", [])
+                val = None
+                for col in ("DESPESAS LIQUIDADAS ATÉ O BIMESTRE", "DESPESAS EMPENHADAS ATÉ O BIMESTRE"):
+                    for it in itens:
+                        if (it.get("cod_conta") == "RREO2TotalDespesas"
+                                and str(it.get("coluna", "")).startswith(col)):
+                            val = float(it["valor"])
+                            break
+                    if val is not None:
+                        break
+                return {"id": id_ente, "ano": ano, "valor": val}
+            except Exception:
+                time.sleep(3 * (tentativa + 1))
+        return {"id": id_ente, "ano": ano, "valor": "ERRO"}
+
+    rows, total_erros = [], 0
+    for ano in ANOS:
+        arq = raw_dir / f"rreo_saude_{ano}.jsonl"
+        feitos = {}
+        if arq.exists():
+            for linha in arq.read_text(encoding="utf-8").splitlines():
+                d = json.loads(linha)
+                if d["valor"] not in ("ERRO", None) or d.get("tipos_testados") == 2:
+                    feitos[d["id"]] = d
+        pendentes = [i for i in ids if i not in feitos]
+        print(f"  [SICONFI] {ano}: {len(feitos)} em cache, {len(pendentes)} a consultar...")
+        with open(arq, "a", encoding="utf-8") as fh, ThreadPoolExecutor(max_workers=8) as ex:
+            futs = [ex.submit(consultar, i, ano) for i in pendentes]
+            for k, fut in enumerate(as_completed(futs), 1):
+                d = fut.result()
+                fh.write(json.dumps(d) + "\n")
+                fh.flush()
+                if d["valor"] != "ERRO":
+                    feitos[d["id"]] = d
+                if k % 500 == 0:
+                    print(f"  [SICONFI] {ano}: {k}/{len(pendentes)}", end="\r")
+        erros = len(ids) - len(feitos)
+        total_erros += erros
+        if erros:
+            print(f"\n  [SICONFI] AVISO {ano}: {erros} municípios com erro (rode de novo para retomar).")
+        for d in feitos.values():
+            if d["valor"] is not None:
+                rows.append({"CODMUN6": d["id"][:6], "ANO": ano, "DESPESA_SAUDE_RS": d["valor"]})
+
+    df = pd.DataFrame(rows, columns=["CODMUN6", "ANO", "DESPESA_SAUDE_RS"])
+    print(f"  [SICONFI] {len(df):,} registros município-ano com despesa em saúde.")
+    if total_erros == 0:          # só fixa o cache final se não houve falhas
+        df.to_parquet(cache)
     return df
 
 
@@ -319,41 +453,26 @@ def extrair_ipea() -> pd.DataFrame:
     if cache.exists():
         return pd.read_parquet(cache)
 
+    # O ipeadatapy atual não devolve mais o código do município (a coluna CODE é o
+    # código da série), por isso a consulta vai direto à API OData do Ipeadata,
+    # que traz TERCODIGO (código IBGE) e NIVNOME (nível territorial).
     dfs = []
-    try:
-        import ipeadatapy as ipea  # type: ignore
-
-        for col, series_id in _IPEA_SERIES.items():
+    for col, series_id in _IPEA_SERIES.items():
+        url = f"http://www.ipeadata.gov.br/api/odata4/ValoresSerie(SERCODIGO='{series_id}')"
+        for tentativa in range(4):
             try:
-                df = ipea.timeseries(series_id)
-                # Normaliza colunas (podem variar por versão do ipeadatapy)
-                df.columns = [c.strip().upper() for c in df.columns]
-                # Filtra ano 2010
-                for date_col in ("YEAR", "DATE", "RAW DATE"):
-                    if date_col in df.columns:
-                        df = df[df[date_col].astype(str).str.startswith("2010")]
-                        break
-                # Pega código do município e valor
-                for code_col in ("CODE", "TERRITORY CODE", "IBGE"):
-                    if code_col in df.columns:
-                        df = df.rename(columns={code_col: "CODMUN7"})
-                        break
-                for val_col in ("VALUE", "VALOR"):
-                    if val_col in df.columns:
-                        df = df.rename(columns={val_col: col})
-                        break
-                if "CODMUN7" in df.columns and col in df.columns:
-                    dfs.append(df[["CODMUN7", col]])
-                    print(f"    {series_id} ({col}): {len(df)} municípios")
+                vals = requests.get(url, timeout=180).json()["value"]
+                break
             except Exception as e:
-                print(f"    Aviso {col}: {e}")
-    except ImportError:
-        print("  [IPEA] ipeadatapy não instalado — tente: pip install ipeadatapy")
-
-    if not dfs:
-        df_vazio = pd.DataFrame(columns=["CODMUN7"] + list(_IPEA_SERIES.keys()))
-        df_vazio.to_parquet(cache)
-        return df_vazio
+                print(f"    Aviso {series_id}: tentativa {tentativa+1} ({e})")
+                time.sleep(10)
+        else:
+            raise RuntimeError(f"[IPEA] Falha ao baixar {series_id}")
+        df = pd.DataFrame(vals)
+        df = df[(df["NIVNOME"] == "Municípios") & df["VALDATA"].astype(str).str.startswith("2010")]
+        df = df.rename(columns={"TERCODIGO": "CODMUN7", "VALVALOR": col})[["CODMUN7", col]]
+        dfs.append(df)
+        print(f"    {series_id} ({col}): {len(df)} municípios")
 
     df_final = dfs[0]
     for d in dfs[1:]:
@@ -372,6 +491,7 @@ def construir_feature_matrix(
     pib: pd.DataFrame,
     desp: pd.DataFrame,
     ipea: pd.DataFrame,
+    pop_faixa: pd.DataFrame = pd.DataFrame(),
 ) -> pd.DataFrame:
     """Faz join de todas as fontes e engenharia de features."""
     print("  [Load] Construindo feature matrix...")
@@ -421,6 +541,28 @@ def construir_feature_matrix(
     fm["DESPESA_SAUDE_PC"]  = fm.get("DESPESA_SAUDE_RS", pd.Series(np.nan, index=fm.index)) / fm["POPULACAO"].replace(0, np.nan)
     fm["TAXA_EVITAVEL_100K"] = (fm["OBITOS_EVITAVEIS"] / fm["POPULACAO"].replace(0, np.nan)) * 100_000
 
+    # Taxa padronizada por idade — método direto.
+    # População-padrão: Brasil, Censo 2022 (soma dos municípios por faixa).
+    #   taxa_pad = Σ_f (óbitos_f / pop_f) · Ppad_f / Ppad_total · 100.000
+    # Ppad_total é a população total do Brasil (todas as idades), de modo que a
+    # taxa padronizada fica na mesma escala da taxa bruta (óbitos 5–74 / pop total).
+    if not pop_faixa.empty:
+        ob_f = pd.read_parquet(DATA_PROC / "obitos_faixa_municipio.parquet")
+        ob_f = ob_f[ob_f["FAIXA"].between(5, 70)]
+        pf = pop_faixa[["CODMUN6", "FAIXA", "POP"]]
+        pad = pf.groupby("FAIXA")["POP"].sum()
+        pop_br_total = pop.drop_duplicates("CODMUN6")["POPULACAO"].sum()
+        peso = (pad / pop_br_total).rename("PESO").reset_index()
+
+        # todas as combinações município × ano × faixa (faixas sem óbito contam 0)
+        grade = fm[["CODMUN6", "ANO"]].merge(pf, on="CODMUN6", how="inner")
+        grade = grade.merge(ob_f, on=["CODMUN6", "ANO", "FAIXA"], how="left").fillna({"OBITOS": 0})
+        grade = grade.merge(peso, on="FAIXA")
+        grade = grade[grade["POP"] > 0]
+        grade["CONTRIB"] = grade["OBITOS"] / grade["POP"] * grade["PESO"] * 100_000
+        taxa_pad = grade.groupby(["CODMUN6", "ANO"])["CONTRIB"].sum().rename("TAXA_PADRONIZADA_100K")
+        fm = fm.merge(taxa_pad.reset_index(), on=["CODMUN6", "ANO"], how="left")
+
     # Log-transforms
     for c in ("PIB_PER_CAPITA", "DESPESA_SAUDE_PC", "POPULACAO"):
         if c in fm.columns:
@@ -439,10 +581,14 @@ def executar_etl() -> pd.DataFrame:
     sim_raw   = extrair_sim()
     obitos    = transformar_sim(sim_raw)
     pop       = extrair_populacao()
+    pop_faixa = extrair_populacao_idade()
     pib       = extrair_pib()
     desp      = extrair_despesa_saude()
     df_ipea   = extrair_ipea()
-    fm        = construir_feature_matrix(obitos, pop, pib, desp, df_ipea)
+    for nome, d in (("população", pop), ("população por idade", pop_faixa), ("PIB", pib)):
+        if d.empty:
+            raise RuntimeError(f"[ETL] Falha ao obter {nome} do IBGE.")
+    fm        = construir_feature_matrix(obitos, pop, pib, desp, df_ipea, pop_faixa)
 
     print("── ETL concluído ────────────────────────────────────────────\n")
     return fm

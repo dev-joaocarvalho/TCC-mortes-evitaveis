@@ -30,6 +30,12 @@ MODELS_DIR.mkdir(exist_ok=True)
 FEATURES_CLUSTER = ["IDHM", "GINI", "LOG_PIB_PER_CAPITA", "LOG_DESPESA_SAUDE_PC",
                     "T_ANALF15M", "T_AGUA", "ESPVIDA"]
 
+# Mínimo de óbitos de uma causa no cluster (janela 2022–2024) para entrar no lift
+LIFT_MIN_OBITOS = 50
+
+# Desfecho da regressão: taxa padronizada por idade (método direto, Censo 2022)
+TARGET = "TAXA_PADRONIZADA_100K"
+
 # Features da regressão
 FEATURES_REG = ["LOG_PIB_PER_CAPITA", "LOG_DESPESA_SAUDE_PC", "LOG_POPULACAO",
                 "IDHM", "GINI", "RDPC", "PMPOB", "ESPVIDA", "T_ANALF15M", "T_AGUA"]
@@ -82,8 +88,11 @@ def clusterizar(fm: pd.DataFrame, k: int = 4) -> pd.DataFrame:
         mapa  = {c: i for i, c in enumerate(ordem)}
         base["CLUSTER"] = base["CLUSTER"].map(mapa)
 
-    fm = fm.merge(base[["CODMUN6", "CLUSTER"]], on="CODMUN6", how="left")
-    fm["CLUSTER"] = fm["CLUSTER"].fillna(0).astype(int)
+    # Municípios sem todas as features (ex.: código ignorado "xx0000", municípios
+    # criados após 2010 sem dados do Atlas, sem RREO) ficam fora — antes eram
+    # atribuídos ao Cluster 0 por fillna(0), inflando o cluster mais vulnerável.
+    fm = fm.merge(base[["CODMUN6", "CLUSTER"]], on="CODMUN6", how="inner")
+    fm["CLUSTER"] = fm["CLUSTER"].astype(int)
 
     print(f"  [Cluster] Distribuição: {fm['CLUSTER'].value_counts().sort_index().to_dict()}")
     return fm
@@ -93,7 +102,7 @@ def gerar_perfil_clusters(fm: pd.DataFrame) -> None:
     """Salva CSV com perfil socioeconômico médio por cluster."""
     print("  [Cluster] Gerando perfil dos clusters...")
 
-    cols_perfil = ["TAXA_EVITAVEL_100K", "IDHM", "GINI", "T_AGUA", "ESPVIDA",
+    cols_perfil = ["TAXA_EVITAVEL_100K", "TAXA_PADRONIZADA_100K", "IDHM", "GINI", "T_AGUA", "ESPVIDA",
                    "T_ANALF15M", "LOG_PIB_PER_CAPITA", "LOG_DESPESA_SAUDE_PC"]
     cols_ok = _cols_disponiveis(fm, cols_perfil)
 
@@ -106,12 +115,9 @@ def gerar_perfil_clusters(fm: pd.DataFrame) -> None:
         "LOG_DESPESA_SAUDE_PC": "desp_saude_pc",
         "T_ANALF15M":           "ANALF15M",
         "TAXA_EVITAVEL_100K":   "taxa_bruta",
+        "TAXA_PADRONIZADA_100K": "taxa_padronizada",   # padronização direta (etl.py)
     }
     perfil = perfil.rename(columns=rename)
-
-    # Calcula taxa padronizada (proxy: usa taxa bruta ajustada por ESPVIDA se disponível)
-    if "taxa_bruta" in perfil.columns:
-        perfil["taxa_padronizada"] = perfil["taxa_bruta"]  # substituída se 06 disponível
 
     # Número de municípios por cluster
     n_mun = fm.groupby("CLUSTER")["CODMUN6"].nunique().reset_index(name="n_municipios")
@@ -150,18 +156,20 @@ def gerar_perfil_clusters(fm: pd.DataFrame) -> None:
 
     # Tendência temporal
     tend = fm.groupby("ANO").agg(
-        taxa_media=("TAXA_EVITAVEL_100K", "mean"),
+        n_municipios=("CODMUN6", "nunique"),
         obitos_total=("OBITOS_EVITAVEIS", "sum"),
+        taxa_media=("TAXA_PADRONIZADA_100K", "mean"),     # dashboard rotula como padronizada
+        taxa_bruta_media=("TAXA_EVITAVEL_100K", "mean"),
     ).reset_index()
     tend.to_csv(MODELS_DIR / "tendencia_temporal.csv", index=False)
 
     # Taxa por região
     if "REGIAO" in fm.columns:
         reg = fm.groupby("REGIAO").agg(
-            taxa_bruta=("TAXA_EVITAVEL_100K", "mean"),
             n_municipios=("CODMUN6", "nunique"),
-        ).reset_index()
-        reg["taxa_padronizada"] = reg["taxa_bruta"]  # simplificado
+            taxa_bruta=("TAXA_EVITAVEL_100K", "mean"),
+            taxa_padronizada=("TAXA_PADRONIZADA_100K", "mean"),
+        ).reset_index().round(1)
         reg.to_csv(MODELS_DIR / "taxa_regiao_comparacao.csv", index=False)
 
 
@@ -197,6 +205,8 @@ def mineracao_causas(fm: pd.DataFrame) -> None:
 
         # Lift (sobre-representação vs. média nacional)
         for cid_code, n in freq.items():
+            if n < LIFT_MIN_OBITOS:   # causas raras geram lift instável
+                continue
             pct_cl = n / tot
             pct_gl = freq_global.get(cid_code, 1e-9)
             rows_lift.append({"CLUSTER": cl, "CID_CAT3": cid_code,
@@ -218,7 +228,7 @@ def regressao(fm: pd.DataFrame) -> None:
     """OLS painel (cluster-robust por município) + RF + XGBoost."""
     print("  [Reg] Treinando modelos de regressão...")
 
-    target = "TAXA_EVITAVEL_100K"
+    target = TARGET
     feats  = _cols_disponiveis(fm, FEATURES_REG)
     if not feats or target not in fm.columns:
         print("  [Reg] Dados insuficientes para regressão.")
@@ -263,11 +273,13 @@ def regressao(fm: pd.DataFrame) -> None:
         coefs = pd.DataFrame({
             "feature": ols.params.index,
             "coef":    ols.params.values.round(4),
-            "pvalue":  ols.pvalues.values,
+            "std_err": ols.bse.values.round(4),
+            "t":       ols.tvalues.values.round(4),
+            "p_value": ols.pvalues.values,
             "ci_low":  ols.conf_int()[0].values.round(4),
             "ci_high": ols.conf_int()[1].values.round(4),
         })
-        coefs["sig"] = coefs["pvalue"].apply(sig)
+        coefs["sig"] = coefs["p_value"].apply(sig)
         coefs.to_csv(MODELS_DIR / "coeficientes_ols.csv", index=False)
     except Exception as e:
         print(f"  [Reg] OLS falhou: {e}")

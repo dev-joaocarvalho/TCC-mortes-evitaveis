@@ -28,7 +28,7 @@ def main():
     t0 = time.time()
 
     print("\n[1/2] ETL — Extração, Transformação e Carga")
-    print("      (download SIM via PySUS + IBGE + SICONFI + IPEA)\n")
+    print("      (download SIM via FTP DATASUS + IBGE + SICONFI + IPEA)\n")
     from src.etl import executar_etl
     executar_etl()
 
