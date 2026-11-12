@@ -29,7 +29,8 @@ Requer Python 3.12 (algumas dependências ainda não têm versão pronta para 3.
 ```bash
 pip install -r requirements.txt
 python pipeline.py
-python gerar_figuras.py
+python gerar_figuras.py          # figuras do artigo
+python gerar_figuras_banner.py   # figuras do banner
 streamlit run app.py
 ```
 
@@ -43,6 +44,7 @@ O download do SIM (81 arquivos) e as consultas ao SICONFI (uma por município e 
 ├── app.py           # Dashboard Streamlit (6 páginas)
 ├── pipeline.py      # Orquestrador do pipeline completo
 ├── gerar_figuras.py # Figuras do artigo a partir de models/ (saída: figuras/)
+├── gerar_figuras_banner.py # Figuras do banner (saída: figuras/banner/)
 ├── src/
 │   ├── etl.py       # Extract (FTP DATASUS + APIs) · Transform · Load
 │   └── analise.py   # K-Means · OLS · Random Forest · XGBoost · Lift
@@ -66,14 +68,14 @@ O download do SIM (81 arquivos) e as consultas ao SICONFI (uma por município e 
 - **Classificação:** Lista Brasileira de Causas Evitáveis — LBCE (Malta et al. 2007/2010), 195 prefixos CID-10, faixa 5–74 anos
 - **Padronização etária:** método direto, população-padrão Brasil (Censo 2022), faixas quinquenais de 5 a 74 anos
 - **Clusterização:** K-Means k=4 sobre 7 variáveis socioeconômicas (target excluído)
-- **Regressão:** desfecho = taxa padronizada; OLS painel com erros cluster-robust por município + Random Forest + XGBoost
+- **Regressão:** desfecho = taxa padronizada; OLS painel com erros cluster-robust por município + Random Forest + XGBoost (teste com 20% dos municípios; early stopping do XGBoost com validação retirada do treino)
 - **Mineração:** Análise de lift por CID-10 por cluster (causas com pelo menos 50 óbitos)
 
 ## Principais Achados
 
 1. **Paradoxo etário:** o Norte tem a menor taxa bruta (149,4/100k), que sobe para 188,8/100k após a padronização direta; o Sul cai de 244,8 para 204,2/100k — as diferenças regionais praticamente desaparecem
 2. **Gini (+137)** é o coeficiente OLS mais forte; o IDHM e a despesa em saúde não são significativos
-3. **4 perfis municipais** (K-Means k=4): Norte/NE vulnerável, interior em desenvolvimento, Sul/SE médio e grandes centros
+3. **4 perfis municipais** (K-Means k=4): Norte/NE vulnerável, interior em desenvolvimento, Sul/SE médio e grandes centros — taxas estatisticamente diferentes (ANOVA, p < 0,001), mas próximas na taxa padronizada (191,9 a 207,9/100k)
 4. **Causas distintivas (lift):** eclâmpsia, desnutrição grave e esquistossomose no cluster mais vulnerável; dengue no Sul/SE médio; perfil próximo à média nacional nos grandes centros
 
 ## Referências
