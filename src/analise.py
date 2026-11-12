@@ -135,6 +135,19 @@ def gerar_perfil_clusters(fm: pd.DataFrame) -> None:
     perfil.to_csv(MODELS_DIR / "perfil_clusters.csv", index=False)
     print(f"  [Cluster] perfil_clusters.csv salvo.")
 
+    # ANOVA de um fator: as taxas médias (2022–2024) de cada município diferem entre clusters?
+    from scipy.stats import f_oneway
+    mun = fm.groupby(["CODMUN6", "CLUSTER"])[["TAXA_EVITAVEL_100K", "TAXA_PADRONIZADA_100K"]].mean().reset_index()
+    linhas = []
+    for col, nome in (("TAXA_EVITAVEL_100K", "taxa_bruta"), ("TAXA_PADRONIZADA_100K", "taxa_padronizada")):
+        grupos = [g[col].dropna().values for _, g in mun.groupby("CLUSTER")]
+        F, p = f_oneway(*grupos)
+        n = sum(len(g) for g in grupos)
+        linhas.append({"medida": nome, "F": round(float(F), 2), "p_value": float(p),
+                       "gl_entre": len(grupos) - 1, "gl_dentro": n - len(grupos)})
+    pd.DataFrame(linhas).to_csv(MODELS_DIR / "anova_clusters.csv", index=False)
+    print("  [Cluster] anova_clusters.csv salvo.")
+
     # Composição LBCE por cluster
     cols_lbce = ["imunoprevencao", "doencas_infecciosas", "doencas_nao_transmissiveis", "morte_materna"]
     cols_lbce_ok = _cols_disponiveis(fm, cols_lbce)
@@ -301,7 +314,12 @@ def regressao(fm: pd.DataFrame) -> None:
                            subsample=0.8, colsample_bytree=0.8,
                            early_stopping_rounds=30, random_state=42,
                            verbosity=0)
-        xgb.fit(X_tr, y_tr, eval_set=[(X_te, y_te)], verbose=False)
+        # Early stopping com validação retirada do TREINO (15% dos municípios de treino);
+        # o conjunto de teste não participa de nenhuma decisão do treinamento.
+        gss_val = GroupShuffleSplit(n_splits=1, test_size=0.15, random_state=42)
+        fit_idx, val_idx = next(gss_val.split(X_tr, y_tr, g_tr))
+        xgb.fit(X_tr.iloc[fit_idx], y_tr.iloc[fit_idx],
+                eval_set=[(X_tr.iloc[val_idx], y_tr.iloc[val_idx])], verbose=False)
         pred_xgb = xgb.predict(X_te)
         r2_xgb   = float(1 - ((y_te - pred_xgb)**2).sum() / ((y_te - y_te.mean())**2).sum())
         rmse_xgb = float(np.sqrt(((y_te - pred_xgb)**2).mean()))

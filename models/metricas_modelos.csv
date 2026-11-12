@@ -1,4 +1,4 @@
 modelo,R2,RMSE,MAE
 OLS,0.081,60.4,45.8
 Random Forest,0.093,60.0,45.3
-XGBoost,0.1,59.7,45.2
+XGBoost,0.09,60.1,45.4

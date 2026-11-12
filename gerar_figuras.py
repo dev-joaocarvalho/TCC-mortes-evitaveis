@@ -129,3 +129,61 @@ f5.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 1], tickfont
                              font=dict(size=16)),
                  margin=dict(l=75, r=125, t=20, b=10), **BASE)
 salvar(f5, "figura5_radar.png", 600)
+
+
+# ── Figura do fluxo de trabalho (etapas e ferramentas) ────────────────────────
+def caixa(fig, x0, x1, y0, y1, texto, cor, fonte=15, borda=None):
+    fig.add_shape(type="rect", x0=x0, x1=x1, y0=y0, y1=y1, xref="paper", yref="paper",
+                  fillcolor=cor, line=dict(color=borda or cor, width=1.5), layer="below")
+    fig.add_annotation(x=(x0 + x1) / 2, y=(y0 + y1) / 2, xref="paper", yref="paper", text=texto,
+                       showarrow=False, font=dict(size=fonte, color="#111827"), align="center",
+                       xanchor="center", yanchor="middle")
+
+
+def seta(fig, x, y_de, y_ate):
+    fig.add_annotation(x=x, y=y_ate, ax=x, ay=y_de, xref="x", yref="y", axref="x",
+                       ayref="y", showarrow=True, arrowhead=2, arrowsize=1.3, arrowwidth=2,
+                       arrowcolor="#374151", text="")
+
+
+ff = go.Figure()
+ff.update_layout(xaxis=dict(visible=False, range=[0, 1]), yaxis=dict(visible=False, range=[0, 1]),
+                 margin=dict(l=4, r=4, t=4, b=4), plot_bgcolor="white", **BASE)
+AZ, VD, LJ, RX, CZ = "#dbeafe", "#dcfce7", "#ffedd5", "#ede9fe", "#f3f4f6"
+# 1. Fontes
+caixa(ff, 0.0, 1.0, 0.835, 1.0, "", CZ, borda="#9ca3af")
+ff.add_annotation(x=0.5, y=0.985, xref="paper", yref="paper", showarrow=False,
+                  text="<b>Fontes de dados abertos</b>", font=dict(size=16), yanchor="top", xanchor="center")
+for (x0, x1, y0, y1, t) in [(0.03, 0.49, 0.90, 0.945, "<b>SIM/DATASUS</b> · óbitos"),
+                            (0.51, 0.97, 0.90, 0.945, "<b>IBGE</b> · população, PIB"),
+                            (0.03, 0.49, 0.845, 0.89, "<b>Siconfi</b> · gasto em saúde"),
+                            (0.51, 0.97, 0.845, 0.89, "<b>Ipeadata</b> · IDHM, Gini…")]:
+    caixa(ff, x0, x1, y0, y1, t, "white", fonte=14, borda="#9ca3af")
+seta(ff, 0.5, 0.835, 0.795)
+# 2–4. ETL
+etapas = [(0.695, 0.795, "<b>1. Extração</b><br>download automático (FTP e APIs)<br><i>Python · requests · datasus-dbc</i>"),
+          (0.565, 0.665, "<b>2. Transformação</b><br>classificação LBE · taxas bruta e<br>padronizada por idade · <i>pandas, NumPy</i>"),
+          (0.455, 0.535, "<b>3. Carga</b><br>matriz de atributos município × ano<br><i>Apache Parquet</i>")]
+for i, (y0, y1, t) in enumerate(etapas):
+    caixa(ff, 0.06, 0.94, y0, y1, t, AZ, borda="#60a5fa")
+    if i < len(etapas) - 1:
+        seta(ff, 0.5, y0, etapas[i + 1][1])
+# 5. Análises (três em paralelo)
+seta(ff, 0.5, 0.455, 0.415)
+ff.add_shape(type="line", x0=0.17, x1=0.83, y0=0.415, y1=0.415, xref="paper", yref="paper",
+             line=dict(color="#374151", width=2))
+analises = [(0.0, 0.32, "<b>Regressão</b><br>OLS<br>Random Forest<br>XGBoost"),
+            (0.34, 0.66, "<b>Clusterização</b><br>K-Means<br>(4 grupos)"),
+            (0.68, 1.0, "<b>Mineração</b><br>de causas<br>(lift por CID-10)")]
+for x0, x1, t in analises:
+    seta(ff, (x0 + x1) / 2, 0.415, 0.375)
+    caixa(ff, x0, x1, 0.235, 0.375, t, VD, fonte=14, borda="#4ade80")
+ff.add_annotation(x=0.5, y=0.215, xref="paper", yref="paper", showarrow=False, yanchor="top", xanchor="center",
+                  text="<i>statsmodels · scikit-learn · xgboost</i>", font=dict(size=14))
+# 6–7. Resultados e conclusões
+seta(ff, 0.5, 0.17, 0.14)
+caixa(ff, 0.06, 0.94, 0.075, 0.14, "<b>4. Resultados</b><br>tabelas, figuras (Plotly) e dashboard (Streamlit)", LJ,
+      fonte=14, borda="#fb923c")
+seta(ff, 0.5, 0.075, 0.047)
+caixa(ff, 0.25, 0.75, 0.0, 0.045, "<b>Conclusões</b>", RX, fonte=15, borda="#a78bfa")
+salvar(ff, "figura_fluxo_trabalho.png", 760)

@@ -150,18 +150,16 @@ DESCRICOES_CID = {
     "O15":"Eclâmpsia","O14":"Pré-eclâmpsia",
 }
 NARRATIVAS_CLUSTER = {
-    0: ("Municípios do Norte e Nordeste com estrutura sanitária mais frágil. "
-        "Doença de Chagas (B57), alcoolismo (K70/F10) e AVC (I64) são as causas mais distintivas — "
-        "doenças ligadas a determinantes sociais historicamente negligenciados."),
-    1: ("Interior do Brasil em transição socioeconômica. Esquistossomose (B65) e Doença de Chagas (B57) "
-        "marcam o perfil — parasitoses dependentes de saneamento e contato com água "
-        "contaminada, prevalentes em áreas rurais do Nordeste e Norte."),
-    2: ("Municípios de porte médio no Sul e Sudeste com IDH intermediário. "
-        "Dengue (A90) é o principal diferencial, refletindo a expansão do Aedes aegypti "
-        "em cidades médias com urbanização acelerada e saneamento parcial."),
-    3: ("Grandes centros urbanos com maior IDH. Apesar do maior desenvolvimento, prevalecem "
-        "causas cardiovasculares urbanas (I63 — AVC isquêmico, I25 — isquemia coronariana) "
-        "e meningite meningocócica (A39), característica de aglomerados populacionais densos."),
+    0: ("Municípios do Norte e Nordeste com os piores indicadores socioeconômicos. "
+        "Eclâmpsia (O15), desnutrição grave (E43) e esquistossomose (B65) são as causas mais "
+        "distintivas — mortes ligadas ao cuidado na gestação, à nutrição e ao saneamento."),
+    1: ("Interior em desenvolvimento, sobretudo no Nordeste e no Norte. Esquistossomose (B65) e "
+        "eclâmpsia (O15) marcam o perfil — parasitoses ligadas ao saneamento e complicações na gravidez."),
+    2: ("Municípios de porte médio no Sul, Sudeste e Centro-Oeste. Dengue (A90) e enfisema (J43) "
+        "são os principais diferenciais, com lifts moderados."),
+    3: ("Grandes centros com os melhores indicadores. Nenhuma causa se destaca muito da média "
+        "nacional: o perfil de causas é parecido com o do país, com AVC isquêmico (I63) e "
+        "infecção meningocócica (A39) entre as mais frequentes em relação à média."),
 }
 
 
@@ -190,6 +188,20 @@ def load_perfil() -> pd.DataFrame:
         if col in df.columns:
             df[f"{col}_real"] = np.expm1(df[col].clip(lower=0))
     return df
+
+
+def _br(x: float, casas: int = 1) -> str:
+    """Número no formato brasileiro (vírgula decimal)."""
+    return f"{x:.{casas}f}".replace(".", ",")
+
+
+def _p_cientifico(p: float) -> str:
+    """p-valor em notação científica legível, ex.: 2,10×10⁻¹⁶."""
+    if p >= 0.001:
+        return _br(p, 3)
+    m, e = f"{p:.2e}".split("e")
+    sup = str(int(e)).translate(str.maketrans("-0123456789", "⁻⁰¹²³⁴⁵⁶⁷⁸⁹"))
+    return f"{m.replace('.', ',')}×10{sup}"
 
 
 def _rotular_cid(df: pd.DataFrame) -> pd.DataFrame:
@@ -295,7 +307,7 @@ públicas de atenção básica.
         st.markdown("""
 | Etapa | Tecnologia | Saída |
 |---|---|---|
-| **Extract** | PySUS + APIs REST | Microdados brutos (.parquet) |
+| **Extract** | FTP do DATASUS + APIs REST | Microdados brutos (.parquet) |
 | **Transform** | Pandas + LBCE | feature_matrix.parquet |
 | **Load** | Apache Parquet | Formato colunar otimizado |
 | **Clusterização** | K-Means (k=4) | perfil_clusters.csv |
@@ -306,7 +318,7 @@ públicas de atenção básica.
 
         st.markdown("### Objetivos Específicos")
         st.markdown("""
-1. Estruturar um **pipeline ETL** automatizado via PySUS e APIs públicas
+1. Estruturar um **pipeline ETL** automatizado via FTP do DATASUS e APIs públicas
 2. Armazenar os dados processados em **formato Parquet** (colunar, comprimido)
 3. Aplicar **K-Means** para agrupar municípios com perfis socioeconômicos similares
 4. Quantificar a associação via **regressão OLS** com erros cluster-robust
@@ -320,7 +332,7 @@ públicas de atenção básica.
     st.markdown("""
 | Fonte | Conteúdo | Acesso |
 |---|---|---|
-| **SIM/DATASUS** | Microdados de óbitos com CID-10 (2022–2024) | PySUS (FTP abstraído) |
+| **SIM/DATASUS** | Microdados de óbitos com CID-10 (2022–2024) | FTP público do DATASUS |
 | **IBGE Sidra** | População municipal (Censo 2022), PIB municipal | API REST |
 | **SICONFI/STN** | Despesa municipal em saúde (Função 10) | API REST |
 | **IPEA/Atlas DH** | IDH-M, Gini, renda, saneamento, esperança de vida | ipeadatapy |
@@ -330,15 +342,23 @@ públicas de atenção básica.
 
     st.markdown("### Lista Brasileira de Causas Evitáveis (LBCE)")
     st.markdown(
-        "Classificação de Malta et al. (2007/2010) — 344 prefixos CID-10, faixa etária **5–74 anos**. "
+        "Classificação de Malta et al. (2007/2010) — 195 categorias CID-10 (3 caracteres), faixa etária **5–74 anos**. "
         "Causas externas (acidentes, homicídios) deliberadamente excluídas: determinantes "
         "são distintos das variáveis socioeconômicas do modelo."
     )
+    lb = _csv("lbce_por_cluster.csv")
+
+    def _faixa(col: str, casas: int) -> str:
+        if lb.empty or col not in lb.columns:
+            return "—"
+        return f"{_br(lb[col].min(), casas)}–{_br(lb[col].max(), casas)}%"
+
+    st.caption("Participação de cada grupo nas mortes evitáveis (faixa entre os 4 clusters, 2022–2024).")
     col_l1, col_l2, col_l3, col_l4 = st.columns(4)
-    col_l1.metric("Imunopreveníveis", "~0,1%", "vacinação")
-    col_l2.metric("D. Infecciosas", "~18%", "diagnóstico/tratamento")
-    col_l3.metric("D. Não Transmissíveis", "~81%", "prevenção/atenção básica")
-    col_l4.metric("Morte Materna", "~0,4%", "gestação/parto")
+    col_l1.metric("Imunopreveníveis", _faixa("imunoprevencao", 2), "vacinação")
+    col_l2.metric("D. Infecciosas", _faixa("doencas_infecciosas", 1), "diagnóstico/tratamento")
+    col_l3.metric("D. Não Transmissíveis", _faixa("doencas_nao_transmissiveis", 1), "prevenção/atenção básica")
+    col_l4.metric("Morte Materna", _faixa("morte_materna", 2), "gestação/parto")
 
     st.markdown("""
 <div class="footer-bar">
@@ -453,10 +473,17 @@ elif pagina == "📊 Panorama Nacional":
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         )
         st.plotly_chart(fig_par, use_container_width=True)
+        rg = regiao.set_index("REGIAO")
+        menor_b, maior_b = rg["taxa_bruta"].idxmin(), rg["taxa_bruta"].idxmax()
+        d_menor = rg.loc[menor_b, "taxa_padronizada"] - rg.loc[menor_b, "taxa_bruta"]
+        d_maior = rg.loc[maior_b, "taxa_padronizada"] - rg.loc[maior_b, "taxa_bruta"]
         st.info(
-            "**Norte:** taxa bruta 158,9 (menor do país) → padronizada 227,7 (+68,8).  \n"
-            "**Sul:** taxa bruta 256,5 (maior) → padronizada 241,8 (−14,7).  \n"
-            "O gradiente real após padronização: **Norte/Nordeste com maior carga** de mortalidade evitável."
+            f"**{REGIOES[menor_b]}:** taxa bruta {_br(rg.loc[menor_b, 'taxa_bruta'])} (a menor do país) → "
+            f"padronizada {_br(rg.loc[menor_b, 'taxa_padronizada'])} ({'+' if d_menor >= 0 else '−'}{_br(abs(d_menor))}).  \n"
+            f"**{REGIOES[maior_b]}:** taxa bruta {_br(rg.loc[maior_b, 'taxa_bruta'])} (a maior) → "
+            f"padronizada {_br(rg.loc[maior_b, 'taxa_padronizada'])} ({'+' if d_maior >= 0 else '−'}{_br(abs(d_maior))}).  \n"
+            f"Após a padronização, as regiões ficam próximas: de {_br(rg['taxa_padronizada'].min())} a "
+            f"{_br(rg['taxa_padronizada'].max())} óbitos por 100 mil habitantes."
         )
 
     st.divider()
@@ -800,19 +827,20 @@ elif pagina == "🔬 Análise de Causas":
         "**Resultado-chave da mineração:** a variação no *tipo* de causa é o que diferencia "
         "os clusters — não apenas a quantidade de óbitos."
     )
+    topo = (lift_df.sort_values("lift", ascending=False).groupby("CLUSTER").head(1)
+            .set_index("CLUSTER") if not lift_df.empty else pd.DataFrame())
     resumo_data = {
         "Cluster": list(CLUSTER_LABELS.values()),
         "Causa mais distintiva (lift)": [
-            "Doença de Chagas (B57) · 1,6×",
-            "Esquistossomose (B65) · 2,5×",
-            "Dengue (A90) · 1,8×",
-            "AVC isquêmico (I63) · urbano",
+            (f"{DESCRICOES_CID.get(topo.loc[c, 'CID_CAT3'], topo.loc[c, 'CID_CAT3'])} "
+             f"({topo.loc[c, 'CID_CAT3']}) · {_br(topo.loc[c, 'lift'], 2)}×") if c in topo.index else "—"
+            for c in CLUSTER_LABELS
         ],
         "Interpretação": [
-            "Doenças negligencie das, ligadas a condições ambientais",
-            "Parasitoses dependentes de saneamento básico",
-            "Expansão do Aedes aegypti em cidades médias",
-            "Causas cardiovasculares urbanas em aglomerados",
+            "Mortes ligadas à gestação, à nutrição e ao saneamento",
+            "Parasitoses ligadas ao saneamento básico",
+            "Arboviroses (dengue) em cidades médias",
+            "Perfil de causas próximo da média nacional",
         ],
     }
     st.dataframe(pd.DataFrame(resumo_data), use_container_width=True, hide_index=True)
@@ -851,10 +879,11 @@ elif pagina == "📈 Modelagem Estatística":
                        f"RMSE {row['RMSE']:.1f} | MAE {row['MAE']:.1f}")
 
     st.warning(
-        "**R² ≈ 10% — esperado e não invalidante:** variáveis socioeconômicas capturam "
+        f"**R² entre {_br(metricas['R2'].min(), 3)} e {_br(metricas['R2'].max(), 3)} — esperado e não invalidante:** "
+        "variáveis socioeconômicas capturam "
         "padrões estruturais mas não fatores locais (qualidade da rede de saúde, "
         "sub-registro de óbitos, comportamentos). O que importa é a **direção, magnitude "
-        "e significância dos coeficientes** — convergentes nos três modelos."
+        "e significância dos coeficientes**."
     )
 
     if not metricas.empty:
@@ -875,16 +904,21 @@ elif pagina == "📈 Modelagem Estatística":
         "H₀: as médias de mortalidade são iguais entre os 4 clusters. "
         "Rejeitar H₀ confirma que o K-Means separou grupos com mortalidade distinta."
     )
-    va1, va2 = st.columns(2)
-    va1.metric("ANOVA — Taxa bruta", "F = 290,09", "p = 5,97×10⁻¹⁷⁵ (***)",
-               help="Diferença altamente significativa entre clusters na taxa bruta")
-    va2.metric("ANOVA — Taxa padronizada", "F = 28,02", "p = 5,62×10⁻¹⁸ (***)",
-               help="Diferença significativa mesmo após controlar estrutura etária")
-    st.info(
-        "Ambos os p-valores são virtualmente zero: os 4 clusters **não são arbitrários** — "
-        "representam grupos com mortalidade evitável estatisticamente distinta, "
-        "mesmo que o target **não tenha entrado** na clusterização."
-    )
+    anova = _csv("anova_clusters.csv")
+    if not anova.empty:
+        av = anova.set_index("medida")
+        va1, va2 = st.columns(2)
+        for col, chave, nome in ((va1, "taxa_bruta", "Taxa bruta"), (va2, "taxa_padronizada", "Taxa padronizada")):
+            r = av.loc[chave]
+            col.metric(f"ANOVA — {nome}", f"F = {_br(r['F'], 2)}", f"p = {_p_cientifico(r['p_value'])}",
+                       help=f"Graus de liberdade: {int(r['gl_entre'])} e {int(r['gl_dentro'])} (médias por município)")
+        pf_ = load_perfil()
+        st.info(
+            "Os p-valores são muito pequenos: os 4 clusters têm taxas médias **estatisticamente diferentes**, "
+            "mesmo que a taxa **não tenha entrado** na clusterização. Na taxa padronizada, porém, a diferença é "
+            f"pequena em valores absolutos: de {_br(pf_['taxa_padronizada'].min())} a "
+            f"{_br(pf_['taxa_padronizada'].max())} óbitos por 100 mil habitantes."
+        )
 
     st.divider()
     col_a, col_b = st.columns(2)
@@ -913,15 +947,27 @@ elif pagina == "📈 Modelagem Estatística":
             fig_coef.update_layout(height=400, showlegend=False,
                                    xaxis_title="Efeito na taxa padronizada /100k")
             st.plotly_chart(fig_coef, use_container_width=True)
-            st.caption("🔴 aumenta mortalidade · 🟢 reduz mortalidade · *** p<0,001")
+            st.caption("🔴 aumenta mortalidade · 🟢 reduz mortalidade · *** p<0,001 · ** p<0,01 · * p<0,05")
 
         with st.expander("Interpretação dos principais coeficientes"):
-            st.markdown("""
-- **Gini (+151):** efeito mais forte — 1pp de desigualdade → +151 óbitos/100k
-- **Esperança de vida (−4,2):** cada ano extra → −4,2 óbitos/100k
-- **Tamanho pop. (+13):** municípios maiores têm melhor registro de óbitos
-- **Despesa saúde (+8,8):** endogeneidade — municípios mais doentes gastam mais
-- **Renda per capita (−0,14):** efeito parcialmente capturado pelo IDH-M
+            cf = coefs.set_index("feature")
+
+            def _c(f):
+                r = cf.loc[f]
+                sig = r["sig"].replace("*", r"\*") if isinstance(r["sig"], str) and r["sig"] else "não signif."
+                return r["coef"], sig
+
+            def _s(x, casas=1):  # número com sinal: +1,0 / −1,0
+                return ("+" if x >= 0 else "−") + _br(abs(x), casas)
+
+            g, gs = _c("GINI"); e, es = _c("ESPVIDA"); po, ps = _c("LOG_POPULACAO")
+            d, ds = _c("LOG_DESPESA_SAUDE_PC"); rd, rs = _c("RDPC"); i, is_ = _c("IDHM")
+            st.markdown(f"""
+- **Gini ({_s(g)}; {gs}):** maior efeito — um aumento de 0,1 no índice → {_s(g / 10)} óbitos/100k
+- **Esperança de vida ({_s(e)}; {es}):** cada ano a mais → {_s(e)} óbitos/100k
+- **Tamanho da população, log ({_s(po)}; {ps}):** municípios maiores têm taxas maiores (possivelmente melhor registro de óbitos)
+- **Renda per capita ({_s(rd, 2)}; {rs}):** cada R$ 100 a mais → {_s(rd * 100)} óbitos/100k
+- **IDH-M ({_s(i)}; {is_}) e despesa em saúde, log ({_s(d)}; {ds}):** sem efeito significativo quando se comparam municípios em condições semelhantes
 """)
 
     with col_b:
@@ -968,7 +1014,7 @@ elif pagina == "📈 Modelagem Estatística":
             fig_ci.add_vline(x=0, line_dash="dash", line_color="gray")
             fig_ci.update_layout(height=400, xaxis_title="Coeficiente (IC 95%)")
             st.plotly_chart(fig_ci, use_container_width=True)
-            st.caption("Barras que cruzam o zero → não significativo ao nível 5%. Erros HC3 cluster-robust por município.")
+            st.caption("Barras que cruzam o zero → não significativo ao nível 5%. Erros-padrão robustos agrupados por município.")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -993,26 +1039,33 @@ por causas evitáveis no Brasil entre 2022 e 2024?</strong>
 
     st.markdown("### Achados Principais")
 
+    rg = _csv("taxa_regiao_comparacao.csv").set_index("REGIAO")
+    cf = _csv("coeficientes_ols.csv").set_index("feature")
+    pf_ = load_perfil()
+    met = _csv("metricas_modelos.csv")
+    av = _csv("anova_clusters.csv").set_index("medida")
     achados = [
-        ("Paradoxo da taxa bruta corrigido",
-         "Pela taxa bruta, o Norte aparecia com a menor mortalidade (158,9/100k). "
-         "Após padronização etária direta, sobe para 227,7/100k. O Sul cai de 256,5 → 241,8/100k. "
-         "O gradiente real: Norte/Nordeste com maior carga de mortalidade evitável."),
-        ("Desigualdade supera pobreza absoluta",
-         "O Gini (+151) é o coeficiente OLS mais forte — a distribuição da renda importa "
-         "mais que o nível médio de PIB per capita. Resultado consistente nos três modelos."),
-        ("4 perfis geográficos estatisticamente distintos",
-         "K-Means k=4 identificou clusters confirmados por ANOVA (p < 10⁻¹⁷). "
-         "Cluster 0/1 = Norte/Nordeste vulnerável e em transição; "
-         "Cluster 2/3 = Centro-Sul médio e grandes centros."),
+        ("Paradoxo da taxa bruta",
+         f"Pela taxa bruta, o Norte aparecia com a menor mortalidade ({_br(rg.loc['N', 'taxa_bruta'])}/100k). "
+         f"Após a padronização etária direta, sobe para {_br(rg.loc['N', 'taxa_padronizada'])}/100k, e o Sul cai "
+         f"de {_br(rg.loc['S', 'taxa_bruta'])} para {_br(rg.loc['S', 'taxa_padronizada'])}/100k: "
+         "as diferenças entre as regiões praticamente desaparecem."),
+        ("A desigualdade pesa mais que o nível de desenvolvimento",
+         f"O Gini ({_br(cf.loc['GINI', 'coef'])}) é o coeficiente OLS de maior efeito (p < 0,001). "
+         f"O IDH-M (p = {_br(cf.loc['IDHM', 'p_value'], 3)}) e o gasto em saúde "
+         f"(p = {_br(cf.loc['LOG_DESPESA_SAUDE_PC', 'p_value'], 3)}) não foram significativos."),
+        ("4 perfis municipais",
+         f"O K-Means (k=4) separou grupos com taxas médias estatisticamente diferentes (ANOVA, "
+         f"p = {_p_cientifico(av.loc['taxa_padronizada', 'p_value'])}), mas a diferença na taxa padronizada "
+         f"é pequena: de {_br(pf_['taxa_padronizada'].min())} a {_br(pf_['taxa_padronizada'].max())}/100k."),
         ("Assinatura epidemiológica por cluster",
-         "Chagas e esquistossomose marcam os municípios vulneráveis (lift > 2×); "
-         "Dengue diferencia cidades médias em urbanização acelerada; "
-         "DCV urbanas e meningite dominam nos grandes centros."),
-        ("Efeito contrafactual modesto (−1%)",
-         "Simular elevação do IDH-M dos municípios mais pobres ao nível do segundo quintil "
-         "reduz a taxa em apenas 1,0% — coerente com o R² baixo e com a literatura: "
-         "efeitos estruturais de IDH são graduais e acumulam-se ao longo de anos."),
+         "Eclâmpsia, desnutrição grave e esquistossomose marcam os municípios mais vulneráveis; "
+         "a dengue diferencia as cidades médias; nos grandes centros o perfil de causas é próximo "
+         "da média nacional."),
+        ("Poder explicativo limitado",
+         f"Os modelos explicam cerca de {_br(met['R2'].min() * 100, 0)}% a {_br(met['R2'].max() * 100, 0)}% "
+         f"das diferenças entre municípios (R² de {_br(met['R2'].min(), 3)} a {_br(met['R2'].max(), 3)}): "
+         "fatores não medidos, como a rede de saúde local e o sub-registro, também pesam."),
     ]
 
     for titulo, texto in achados:
@@ -1029,8 +1082,8 @@ por causas evitáveis no Brasil entre 2022 e 2024?</strong>
         st.markdown("### Limitações")
         limitacoes = [
             ("Sub-registro heterogêneo",
-             "Municípios remotos registram menos óbitos no SIM — a taxa bruta do Cluster 0 "
-             "é artificialmente baixa. Não corrigível sem dados de captura-recaptura."),
+             "Municípios remotos tendem a registrar menos óbitos no SIM, então as taxas do "
+             "Cluster 0 podem estar subestimadas. Não corrigível sem dados de captura-recaptura."),
             ("Atlas DH defasado",
              "IDH-M e Gini baseados no Censo 2010 (12–14 anos de defasagem). "
              "Atlas com Censo 2022 ainda não publicado pelo PNUD/IPEA."),
@@ -1038,9 +1091,11 @@ por causas evitáveis no Brasil entre 2022 e 2024?</strong>
              "Análise ao nível municipal — inferências não se transferem ao nível individual."),
             ("Denominador estático",
              "Estrutura etária do Censo 2022 usada para todos os anos (2022–2024)."),
-            ("Endogeneidade da despesa em saúde",
-             "Coeficiente positivo da despesa reflete causalidade reversa: "
-             "municípios mais doentes gastam mais."),
+            ("Despesa em saúde",
+             "O coeficiente não foi significativo; como o gasto também responde à carga de doença "
+             "(causalidade reversa), seu efeito é difícil de medir com dados observacionais."),
+            ("Associação, não causalidade",
+             "O estudo é observacional: os coeficientes indicam associações, não efeitos causais."),
         ]
         for titulo, texto in limitacoes:
             st.markdown(f"""
@@ -1069,7 +1124,7 @@ por causas evitáveis no Brasil entre 2022 e 2024?</strong>
     col_c1, col_c2, col_c3 = st.columns(3)
     col_c1.success(
         "**Pipeline reprodutível**  \nIntegração de 4 fontes públicas heterogêneas "
-        "via PySUS e APIs REST, com cache e fallbacks automáticos."
+        "via FTP do DATASUS e APIs REST, com cache e retomada automática."
     )
     col_c2.success(
         "**Evidência quantitativa**  \nGini identificado como o determinante "
@@ -1090,6 +1145,7 @@ por causas evitáveis no Brasil entre 2022 e 2024?</strong>
 - IBGE. *Censo Demográfico 2022.* Rio de Janeiro: IBGE, 2023.
 - BREIMAN, L. *Random Forests.* Machine Learning, 45(1):5–32, 2001.
 - CHEN, T.; GUESTRIN, C. *XGBoost: A Scalable Tree Boosting System.* KDD, 2016.
+- MACQUEEN, J. *Some methods for classification and analysis of multivariate observations.* Berkeley Symposium on Mathematical Statistics and Probability, 5., 1967. v. 1, p. 281–297.
 - WORLD HEALTH ORGANIZATION. *World Health Statistics 2023.* Geneva: WHO, 2023.
 """)
 
